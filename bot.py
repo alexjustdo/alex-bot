@@ -15,32 +15,20 @@ TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
-SYSTEM_PROMPT = """Si Alex, priateľská a schopná virtuálna asistentka aj investičný informačný asistent. Hovoríš po slovensky vždy.
+SYSTEM_PROMPT = """Si Alex, priateľská virtuálna asistentka aj investičný informačný asistent. Hovoríš po slovensky vždy.
 
-Pri investičných otázkach:
-- Poskytuj aktuálne ceny akcií, ETF a kryptomien
-- Vysvetľuj finančné pojmy jednoducho
-- Hľadaj aktuálne finančné správy
-- NIKDY nedávaj konkrétne odporúčania kúpiť/predať — vždy pripomeň že si len informačný asistent a nie finančný poradca
-- Môžeš vysvetliť čo je P/E ratio, dividendy, ETF, index fond atď.
-
-Pri bežných otázkach:
-- Pomáhaj s plánovaním, emailmi, brainstormingom
-- Vyhľadávaj aktuálne správy a informácie
+Pri investičných otázkach poskytuj aktuálne ceny, správy a vysvetlenia pojmov. NIKDY nedávaj konkrétne odporúčania kúpiť/predaj.
 
 Ak potrebuješ aktuálne informácie, použi web_search."""
 
 tools = [
     {
         "name": "web_search",
-        "description": "Vyhľadaj aktuálne informácie na internete — správy, ceny akcií, krypto, počasie, udalosti.",
+        "description": "Vyhľadaj aktuálne informácie na internete.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Vyhľadávací dotaz"
-                }
+                "query": {"type": "string", "description": "Vyhľadávací dotaz"}
             },
             "required": ["query"]
         }
@@ -54,41 +42,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conversation_histories[user_id] = []
     await update.message.reply_text(
         "👋 Ahoj! Som Alex, vaša virtuálna asistentka.\n\n"
-        "Viem vám pomôcť s:\n"
-        "📈 Aktuálne ceny akcií a krypta\n"
-        "📰 Finančné správy\n"
-        "📚 Vysvetlenie investičných pojmov\n"
-        "🌐 Vyhľadávanie informácií\n"
-        "✍️ Písanie a plánovanie\n\n"
-        "⚠️ Nie som finančný poradca — informácie sú len vzdelávacie.\n\n"
+        "Viem pomôcť s investíciami, správami, plánovaním a oveľa viac!\n\n"
         "Čím môžem začať? 😊"
     )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     conversation_histories[user_id] = []
-    await update.message.reply_text("🔄 Konverzácia bola resetovaná. Začíname odznova!")
+    await update.message.reply_text("🔄 Resetované. Začíname odznova!")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "💡 *Čo viem robiť:*\n\n"
-        "📈 *Investície:*\n"
-        "• Aktuálne ceny akcií a ETF\n"
-        "• Ceny kryptomien\n"
-        "• Finančné správy\n"
-        "• Vysvetlenie pojmov\n\n"
-        "🌐 *Internet:*\n"
-        "• Aktuálne správy\n"
-        "• Počasie\n"
-        "• Všeobecné vyhľadávanie\n\n"
-        "✍️ *Asistentka:*\n"
-        "• Písanie emailov\n"
-        "• Plánovanie\n"
-        "• Brainstorming\n\n"
-        "*Príkazy:*\n"
-        "/start — Reštart\n"
-        "/reset — Vymazať históriu\n"
-        "/help — Táto správa",
+        "📈 Ceny akcií a krypta\n"
+        "📰 Aktuálne správy\n"
+        "📚 Investičné pojmy\n"
+        "✍️ Písanie a plánovanie\n\n"
+        "/reset — Vymazať históriu",
         parse_mode="Markdown"
     )
 
@@ -109,7 +79,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     try:
-        messages = conversation_histories[user_id].copy()
+        messages = list(conversation_histories[user_id])
 
         while True:
             response = client.messages.create(
@@ -121,21 +91,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             if response.stop_reason == "tool_use":
-                tool_use = next(b for b in response.content if b.type == "tool_use")
-                query = tool_use.input["query"]
-
-                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-
-                search_result = tavily.search(query=query, max_results=5)
-                search_text = "\n".join([f"- {r['title']}: {r['content'][:300]}" for r in search_result['results']])
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        query = block.input["query"]
+                        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+                        search_result = tavily.search(query=query, max_results=3)
+                        search_text = "\n".join([f"- {r['title']}: {r['content'][:200]}" for r in search_result['results']])
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": search_text
+                        })
 
                 messages.append({"role": "assistant", "content": response.content})
-                messages.append({
-                    "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": tool_use.id, "content": search_text}]
-                })
+                messages.append({"role": "user", "content": tool_results})
             else:
-                reply = next(b.text for b in response.content if hasattr(b, 'text'))
+                reply = ""
+                for block in response.content:
+                    if hasattr(block, 'text'):
+                        reply += block.text
                 break
 
         conversation_histories[user_id].append({
