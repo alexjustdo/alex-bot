@@ -15,15 +15,25 @@ TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
-SYSTEM_PROMPT = """Si Alex, priateľská a schopná virtuálna asistentka. Hovoríš po slovensky — vždy, aj keď ti niekto píše po anglicky alebo inak. Si milá, efektívna a praktická.
+SYSTEM_PROMPT = """Si Alex, priateľská a schopná virtuálna asistentka aj investičný informačný asistent. Hovoríš po slovensky vždy.
 
-Ak potrebuješ aktuálne informácie zo sveta (správy, počasie, ceny, udalosti), použi funkciu web_search.
-Odpovedáš stručne a prirodzene. Nepoužívaš dlhé úvody."""
+Pri investičných otázkach:
+- Poskytuj aktuálne ceny akcií, ETF a kryptomien
+- Vysvetľuj finančné pojmy jednoducho
+- Hľadaj aktuálne finančné správy
+- NIKDY nedávaj konkrétne odporúčania kúpiť/predať — vždy pripomeň že si len informačný asistent a nie finančný poradca
+- Môžeš vysvetliť čo je P/E ratio, dividendy, ETF, index fond atď.
+
+Pri bežných otázkach:
+- Pomáhaj s plánovaním, emailmi, brainstormingom
+- Vyhľadávaj aktuálne správy a informácie
+
+Ak potrebuješ aktuálne informácie, použi web_search."""
 
 tools = [
     {
         "name": "web_search",
-        "description": "Vyhľadaj aktuálne informácie na internete. Použi keď potrebuješ správy, aktuálne udalosti, počasie, ceny alebo iné aktuálne informácie.",
+        "description": "Vyhľadaj aktuálne informácie na internete — správy, ceny akcií, krypto, počasie, udalosti.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -44,7 +54,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conversation_histories[user_id] = []
     await update.message.reply_text(
         "👋 Ahoj! Som Alex, vaša virtuálna asistentka.\n\n"
-        "Teraz mám prístup na internet — môžem vyhľadávať správy, počasie, ceny a oveľa viac!\n\n"
+        "Viem vám pomôcť s:\n"
+        "📈 Aktuálne ceny akcií a krypta\n"
+        "📰 Finančné správy\n"
+        "📚 Vysvetlenie investičných pojmov\n"
+        "🌐 Vyhľadávanie informácií\n"
+        "✍️ Písanie a plánovanie\n\n"
+        "⚠️ Nie som finančný poradca — informácie sú len vzdelávacie.\n\n"
         "Čím môžem začať? 😊"
     )
 
@@ -56,12 +72,19 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "💡 *Čo viem robiť:*\n\n"
-        "• Vyhľadávanie správ a informácií 🌐\n"
-        "• Písanie emailov a textov\n"
-        "• Plánovanie úloh a dňa\n"
-        "• Brainstorming a nápady\n"
-        "• Vysvetľovanie tém\n"
-        "• Zhrnutia textov\n\n"
+        "📈 *Investície:*\n"
+        "• Aktuálne ceny akcií a ETF\n"
+        "• Ceny kryptomien\n"
+        "• Finančné správy\n"
+        "• Vysvetlenie pojmov\n\n"
+        "🌐 *Internet:*\n"
+        "• Aktuálne správy\n"
+        "• Počasie\n"
+        "• Všeobecné vyhľadávanie\n\n"
+        "✍️ *Asistentka:*\n"
+        "• Písanie emailov\n"
+        "• Plánovanie\n"
+        "• Brainstorming\n\n"
         "*Príkazy:*\n"
         "/start — Reštart\n"
         "/reset — Vymazať históriu\n"
@@ -87,7 +110,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         messages = conversation_histories[user_id].copy()
-        
+
         while True:
             response = client.messages.create(
                 model="claude-haiku-4-5-20251001",
@@ -100,11 +123,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if response.stop_reason == "tool_use":
                 tool_use = next(b for b in response.content if b.type == "tool_use")
                 query = tool_use.input["query"]
-                
+
                 await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-                
-                search_result = tavily.search(query=query, max_results=3)
-                search_text = "\n".join([f"- {r['title']}: {r['content'][:200]}" for r in search_result['results']])
+
+                search_result = tavily.search(query=query, max_results=5)
+                search_text = "\n".join([f"- {r['title']}: {r['content'][:300]}" for r in search_result['results']])
 
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({
